@@ -1,8 +1,9 @@
 #include <Arduino.h>
 #include <H_bridge_TB6612.hpp>
 #include <config.h>
-#include <QTRSensors.h>
 #include <BluetoothSerial.h>
+#include <PID.h>
+#include <QTRSensors.h>
 
 #define channel1 1
 #define channel2 3
@@ -15,11 +16,18 @@ BluetoothSerial SerialBT;
 Motor left = Motor(AIn1, AIn2, PWMA,  channel1, 10);
 Motor right = Motor(BIn1, BIn2, PWMB,  channel2, 10);
 
+PID pid(0.098, 0.00, 0.160, 3500, 0);
+
 double kP = 0;
 double kI = 0;
 double kD = 0;
-double kV = 500;
+double kV = 250;
 bool start = false;
+bool noSensor = false;
+int leiturasBorda = 0;
+double tempoAntes;
+double tempo;
+double tempoParada;
 
 void Calib(){
   while(millis() < 10000){
@@ -29,9 +37,6 @@ void Calib(){
 
   Serial.println("Calibração Finalizada!");
   SerialBT.println("Calibração Finalizada!");
-}
-
-void Iniciar(){
 }
 
 void PIDReceive(String ValorRecebido){
@@ -54,6 +59,59 @@ void PIDReceive(String ValorRecebido){
     SerialBT.println(kV, 6);
 }
 
+bool verifica_chegada(){
+  bool verificador;
+
+  int chegada = digitalRead(SENSORFIM);
+  if(chegada == 1){
+    if(noSensor == false){
+      noSensor = true;
+      leiturasBorda++;
+    }
+  }
+  if(chegada == 0){
+    if(noSensor == true){
+      noSensor = false;
+    }
+  }
+
+  tempoAntes = millis();
+  
+  if(leiturasBorda == 10){
+    tempo = millis(); 
+    leiturasBorda++;  
+  }
+
+  if(leiturasBorda >= 11 && (tempoAntes - tempo) >= 500)
+  {
+    verificador = true;
+  }
+  else{verificador = false;}
+
+
+  return verificador;
+}
+
+void runningTrack(int velocidadeMaxima){
+  while(!verifica_chegada()){
+    // manda a leitura do QTR pro processamento do pid
+    double correcao = pid.process(qtr.readLineWhite(sensorValues));
+
+    // Printa os valores de P, I, D e a soma "PID" na serial
+    Serial.println(pid.pidString());
+
+    left.drive(constrain(velocidadeMaxima - correcao, 0, velocidadeMaxima));
+    right.drive(constrain(velocidadeMaxima + correcao, 0, velocidadeMaxima));
+  }
+}
+
+void runningTrackBurro(int velocidadeMaxima){
+  while(!verifica_chegada()){
+    left.drive(velocidadeMaxima);
+    right.drive(velocidadeMaxima);
+  }
+}
+
 void comunicationBT(){
   if(SerialBT.available()){
     String valorRecebido = SerialBT.readString();
@@ -61,7 +119,7 @@ void comunicationBT(){
 
     if(valorRecebido == "Cliente Conectado!" || valorRecebido == "Cliente Desconectado!") SerialBT.print(valorRecebido);
     else if(valorRecebido == "a") Calib();
-    else if(valorRecebido == "b") start = true;
+    else if(valorRecebido == "b") runningTrack(kV);
     else if(valorRecebido == "c") start = false;
     else if(valorRecebido.substring(0, 1) == "d") PIDReceive(valorRecebido);
     

@@ -10,3 +10,4 @@
 #define BIn1 26
 #define BIn2 25
 #define PWMB 32
+#define SENSORFIM 13
